@@ -5,26 +5,31 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.documentfile.provider.DocumentFile;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
-import android.provider.MediaStore;
 import android.view.ContextMenu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
-import android.view.MotionEvent;
 import android.view.View;
-import android.widget.AdapterView;
 import android.widget.ImageView;
-import android.widget.PopupMenu;
 import android.widget.Toast;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Random;
 
 public class DigitalPictureFrame extends AppCompatActivity
 {
     private static final int REQUEST_STORAGE_PERMISSION = 1;
-    private static final int REQUEST_IMAGE_PICKER = 2;
-
+    private static final int REQUEST_FOLDER_PICKER = 2;
+    private boolean isAlbumSet = false;
+    private List<DocumentFile> pictures;
 
     public ImageView pictureFrame;
 
@@ -49,12 +54,14 @@ public class DigitalPictureFrame extends AppCompatActivity
 
     public void lookForAlbum()
     {
-//        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-//        intent.addCategory(Intent.CATEGORY_OPENABLE);
-//        intent.setType("image/*");
+//        Intent intent = new Intent(Intent.ACTION_PICK);
+//        intent.setType("*/*");
 //        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-//
-//        startActivityForResult(intent, 2);
+
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        startActivityForResult(intent, REQUEST_FOLDER_PICKER);
 
         // TODO: 9/24/2023 for now ill just go to a single location
 
@@ -64,16 +71,68 @@ public class DigitalPictureFrame extends AppCompatActivity
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data)
     {
-        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_FOLDER_PICKER && resultCode == Activity.RESULT_OK)
+        {
+            if (data != null)
+            {
+                Uri treeUri = data.getData();
+                // Handle the selected directory using the treeUri
+                // You can save this treeUri to access the directory later
+                getContentResolver()
+                        .takePersistableUriPermission(treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                List<DocumentFile> files = getPictures(treeUri);
+                if (!files.isEmpty())
+                {
+                    pictures = files;
+                    isAlbumSet = true;
+                    setRandomPhoto();
+                }
+
+                Toast.makeText(DigitalPictureFrame.this, "album", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void setRandomPhoto()
+    {
+        Random random = new Random();
+
+        pictureFrame.setImageURI(pictures.get(random.nextInt(pictures.size())).getUri());
+    }
+
+    private List<DocumentFile> getPictures(Uri treeUri)
+    {
+        List<DocumentFile> fileList = new ArrayList<>();
+
+        DocumentFile pickedDir = DocumentFile.fromTreeUri(this, treeUri);
+        DocumentFile[] files = pickedDir.listFiles();
+
+        if (files != null)
+        {
+            for (DocumentFile file : files)
+            {
+                if (file.canRead() && file.isFile() && file.getType().contains("image/"))
+                    fileList.add(file);
+            }
+        }
+
+        return fileList;
     }
 
     public void nextPhoto(View view)
     {
-        Toast.makeText(DigitalPictureFrame.this, "next", Toast.LENGTH_SHORT).show();
+        if (isAlbumSet)
+        {
+            Toast.makeText(DigitalPictureFrame.this, "next", Toast.LENGTH_SHORT).show();
+            setRandomPhoto();
+        }
+        else
+            lookForAlbum();
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults)
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults)
     {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_STORAGE_PERMISSION)
