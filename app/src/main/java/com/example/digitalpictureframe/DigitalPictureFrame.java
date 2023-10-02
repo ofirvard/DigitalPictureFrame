@@ -6,50 +6,110 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.documentfile.provider.DocumentFile;
+import jp.wasabeef.glide.transformations.BlurTransformation;
 
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.ContextMenu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.Toast;
+
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.request.target.CustomTarget;
+import com.bumptech.glide.request.target.Target;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import static com.bumptech.glide.request.RequestOptions.bitmapTransform;
 
 public class DigitalPictureFrame extends AppCompatActivity
 {
     private static final int REQUEST_STORAGE_PERMISSION = 1;
     private static final int REQUEST_FOLDER_PICKER = 2;
+    private static Settings settings;
     private boolean isAlbumSet = false;
-    private List<DocumentFile> pictures;
-
-    public ImageView pictureFrame;
+    private List<String> pictures;
+    private ImageView pictureFrame;
+    private ImageView pictureFrameBlur;
+    private ExecutorService executorService = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState)
     {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_digital_picture_frame);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         pictureFrame = findViewById(R.id.pictureFrame);
-
+        pictureFrameBlur = findViewById(R.id.pictureFrameBlur);
+        loadSettings();
 
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
             ActivityCompat.requestPermissions(this, new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, REQUEST_STORAGE_PERMISSION);
 
-
-        // TODO: 9/24/2023 load data from storage, this is later, for now ill request each time
-
         registerForContextMenu(pictureFrame);
         pictureFrame.setOnClickListener(this::nextPhoto);
+    }
+
+    private void loadSettings()
+    {
+        settings = new Settings(this);
+        if (settings.isSet())
+            setAlbum(settings.getUri());
+    }
+
+    private boolean setAlbum(Uri uri)
+    {
+        getContentResolver()
+                .takePersistableUriPermission(uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION |
+                                Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        List<String> files = Util.getPictures(this, uri);
+
+        if (!files.isEmpty())
+        {
+            pictures = files;
+            isAlbumSet = true;
+            setRandomPhoto();
+//            setTimer();
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private void setTimer()
+    {
+        Timer timer = new Timer(true);
+
+        timer.scheduleAtFixedRate(new TimerTask()
+                                  {
+                                      @Override
+                                      public void run()
+                                      {
+                                          setRandomPhoto();
+                                      }
+                                  },
+                0,
+                3000);
     }
 
     public void lookForAlbum()
@@ -68,6 +128,14 @@ public class DigitalPictureFrame extends AppCompatActivity
 
     }
 
+    public void nextPhoto(View view)
+    {
+        if (isAlbumSet)
+            setRandomPhoto();
+        else
+            lookForAlbum();
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data)
     {
@@ -76,58 +144,29 @@ public class DigitalPictureFrame extends AppCompatActivity
             if (data != null)
             {
                 Uri treeUri = data.getData();
-                // Handle the selected directory using the treeUri
-                // You can save this treeUri to access the directory later
-                getContentResolver()
-                        .takePersistableUriPermission(treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                List<DocumentFile> files = getPictures(treeUri);
-                if (!files.isEmpty())
-                {
-                    pictures = files;
-                    isAlbumSet = true;
-                    setRandomPhoto();
-                }
 
-                Toast.makeText(DigitalPictureFrame.this, "album", Toast.LENGTH_SHORT).show();
+                if (setAlbum(treeUri))
+                {
+                    settings.setFolder(treeUri);
+                    settings.save(this);
+                }
             }
         }
+
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     private void setRandomPhoto()
     {
         Random random = new Random();
 
-        pictureFrame.setImageURI(pictures.get(random.nextInt(pictures.size())).getUri());
-    }
+        Uri pictureUri = Uri.parse(pictures.get(random.nextInt(pictures.size())));
 
-    private List<DocumentFile> getPictures(Uri treeUri)
-    {
-        List<DocumentFile> fileList = new ArrayList<>();
-
-        DocumentFile pickedDir = DocumentFile.fromTreeUri(this, treeUri);
-        DocumentFile[] files = pickedDir.listFiles();
-
-        if (files != null)
-        {
-            for (DocumentFile file : files)
-            {
-                if (file.canRead() && file.isFile() && file.getType().contains("image/"))
-                    fileList.add(file);
-            }
-        }
-
-        return fileList;
-    }
-
-    public void nextPhoto(View view)
-    {
-        if (isAlbumSet)
-        {
-            Toast.makeText(DigitalPictureFrame.this, "next", Toast.LENGTH_SHORT).show();
-            setRandomPhoto();
-        }
-        else
-            lookForAlbum();
+        pictureFrame.setImageURI(pictureUri);
+        Glide.with(this)
+                .load(pictureUri)
+                .apply(bitmapTransform(new BlurTransformation(25, 3)))
+                .into(pictureFrameBlur);
     }
 
     @Override
